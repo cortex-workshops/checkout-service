@@ -1,0 +1,20 @@
+openapi: 3.0.0
+info:
+  title: Checkout Service
+  description: Manages shopping cart and checkout flow.
+  x-cortex-tag: checkout-service
+  x-cortex-type: service
+  x-cortex-groups:
+    - web-applications
+  x-cortex-owners:
+    - type: group
+      name: cortex-workshops/web-team
+      provider: GITHUB
+  x-cortex-link:
+    - name: README
+      type: docs
+      url: https://github.com/cortex-workshops/checkout-service#readme
+  x-cortex-git:
+    github:
+      alias: cortex
+      repository: cortex-workshops/checkout-service
