@@ -2,7 +2,7 @@ name: Simulate User Activity (Web - Checkout Service)
 
 on:
   schedule:
-    - cron: "30 14,18,16 * * 1-5"   # Weekdays at 14:00 & 18:00 UTC
+    - cron: "30 14,18 * * 1-5"   # Weekdays at 14:00 & 18:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -213,6 +213,11 @@ jobs:
             exit 0
           fi
 
+          # Save the actor token and remove it from env so gh doesn't auto-use it
+          ORIGINAL_GH_TOKEN="$GH_TOKEN"
+          unset GH_TOKEN
+
+          # Authenticate as reviewer and leave a review/approval
           echo "$REVIEWER_TOKEN" | gh auth login --with-token
           kinds=("COMMENT" "COMMENT" "APPROVE")
           k=${kinds[$RANDOM % ${#kinds[@]}]}
@@ -221,8 +226,11 @@ jobs:
           else
             gh pr review ${{ steps.pr.outputs.number }} --comment --body "Review comment at $(date -u)"
           fi
-          # Restore original actor auth
-          echo "$GH_TOKEN" | gh auth login --with-token
+
+          # Logout reviewer and restore original actor auth
+          gh auth logout -h github.com -y || true
+          echo "$ORIGINAL_GH_TOKEN" | gh auth login --with-token
+          echo "GH_TOKEN=$ORIGINAL_GH_TOKEN" >> $GITHUB_ENV
 
       - name: Maybe merge PR
         if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
