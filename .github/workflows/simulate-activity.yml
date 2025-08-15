@@ -2,7 +2,7 @@ name: Simulate User Activity (Web - Checkout Service)
 
 on:
   schedule:
-    - cron: "30 14,18 * * 1-5"
+    - cron: "30 14,18,16 * * 1-5"   # Weekdays at 14:00 & 18:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -15,77 +15,231 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      # --- Mirror all candidate secrets into env so bash can pick dynamically ---
+      S_PAT_TAYLOR:   ${{ secrets.PAT_TAYLOR }}
+      S_PAT_CATHLEEN: ${{ secrets.PAT_CATHLEEN }}
+      S_PAT_SALLY:    ${{ secrets.PAT_SALLY }}
+      S_PAT_JEFF:     ${{ secrets.PAT_JEFF }}
+      S_PAT_STEPH:    ${{ secrets.PAT_STEPH }}
+      S_PAT_CHASE:    ${{ secrets.PAT_CHASE }}
+      S_PAT_MARION:   ${{ secrets.PAT_MARION }}
+      S_PAT_ROSHNI:   ${{ secrets.PAT_ROSHNI }}
+      S_PAT_GIANPAUL: ${{ secrets.PAT_GIANPAUL }}
+
+      # --- Team actors for THIS repo (Web Team) ---
       ACTORS: |
         [
           {"username":"chase","git_name":"Chase","git_email":"chase@cortex.io","pat_secret":"PAT_CHASE"},
           {"username":"marion","git_name":"Marion","git_email":"marion@cortex.io","pat_secret":"PAT_MARION"},
           {"username":"taylor","git_name":"Taylor Schmidt","git_email":"taylor@cortex.io","pat_secret":"PAT_TAYLOR"}
         ]
+
+      # --- Org-wide reviewer pool (we'll avoid the actor's own token) ---
       REVIEWER_CANDIDATES: |
         ["PAT_TAYLOR","PAT_CATHLEEN","PAT_SALLY","PAT_JEFF","PAT_STEPH","PAT_CHASE","PAT_MARION","PAT_ROSHNI","PAT_GIANPAUL"]
 
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update -y && sudo apt-get install -y jq
-      - id: pick
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+
+      - name: Pick one random actor (from Web Team)
+        id: pick
+        shell: bash
         run: |
-          len=$(jq 'length' <<< "${ACTORS}"); [ "$len" -eq 0 ] && echo "chosen=" >> $GITHUB_OUTPUT && exit 0
-          idx=$((RANDOM % len)); obj=$(jq -r ".[$idx]" <<< "${ACTORS}")
-          echo "username=$(jq -r '.username' <<< "$obj")" >> $GITHUB_OUTPUT
-          echo "git_name=$(jq -r '.git_name' <<< "$obj")" >> $GITHUB_OUTPUT
+          len=$(jq 'length' <<< "${ACTORS}")
+          if [ "$len" -eq 0 ]; then
+            echo "chosen=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          idx=$((RANDOM % len))
+          obj=$(jq -r ".[$idx]" <<< "${ACTORS}")
+          echo "username=$(jq -r '.username' <<< "$obj")"   >> $GITHUB_OUTPUT
+          echo "git_name=$(jq -r '.git_name' <<< "$obj")"   >> $GITHUB_OUTPUT
           echo "git_email=$(jq -r '.git_email' <<< "$obj")" >> $GITHUB_OUTPUT
           echo "pat_secret=$(jq -r '.pat_secret' <<< "$obj")" >> $GITHUB_OUTPUT
-      - id: auth
+
+      - name: Resolve actor token (skip if missing)
+        id: auth
+        shell: bash
         run: |
-          [ -z "${{ steps.pick.outputs.pat_secret }}" ] && echo "skip=true" >> $GITHUB_OUTPUT && exit 0
-          TOKEN="${{ secrets[steps.pick.outputs.pat_secret] }}"; [ -z "$TOKEN" ] && echo "skip=true" >> $GITHUB_OUTPUT && exit 0
+          if [ -z "${{ steps.pick.outputs.pat_secret }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          PAT_SECRET="${{ steps.pick.outputs.pat_secret }}"   # e.g., PAT_TAYLOR
+          TOKEN_VAR="S_${PAT_SECRET}"                         # e.g., S_PAT_TAYLOR
+          TOKEN="${!TOKEN_VAR}"
+
+          if [ -z "$TOKEN" ]; then
+            echo "Secret $PAT_SECRET is not available to this repo; skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           echo "$TOKEN" | gh auth login --with-token
           echo "GH_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "AUTHOR=${{ steps.pick.outputs.git_name }}" >> $GITHUB_ENV
           echo "EMAIL=${{ steps.pick.outputs.git_email }}" >> $GITHUB_ENV
           echo "BRANCH=sim/${{ steps.pick.outputs.username }}-$(date +%s)" >> $GITHUB_ENV
-      - if: steps.auth.outputs.skip == 'true'
+
+      - name: Stop if no actor token
+        if: steps.auth.outputs.skip == 'true'
         run: echo "No valid actor token; ending run."
-      - id: scenario
+
+      - name: Pick scenario
+        id: scenario
         if: steps.auth.outputs.skip != 'true'
+        shell: bash
         run: |
-          scenarios=("OPEN_ONLY" "COMMENT_REVIEW" "APPROVE" "MERGE" "CLOSE_UNMERGED" "BIG_DIFF" "SMALL_DIFF"); weights=(4 3 2 2 1 1 2)
+          scenarios=("OPEN_ONLY" "COMMENT_REVIEW" "APPROVE" "MERGE" "CLOSE_UNMERGED" "BIG_DIFF" "SMALL_DIFF")
+          weights=(4 3 2 2 1 1 2)
           total=0; for w in "${weights[@]}"; do total=$((total+w)); done
-          r=$((RANDOM % total)); acc=0; for i in "${!scenarios[@]}"; do acc=$((acc+weights[i])); if [ $r -lt $acc ]; then echo "value=${scenarios[i]}" >> $GITHUB_OUTPUT; break; fi; done
-      - if: steps.auth.outputs.skip != 'true'
-        run: |
-          git config user.name "$AUTHOR"; git config user.email "$EMAIL"
-          if [ $((RANDOM % 10)) -lt 3 ]; then existing=$(git ls-remote --heads origin "sim/${{ steps.pick.outputs.username }}-*" | head -n1 | awk '{print $2}' | cut -d/ -f3-); if [ -n "$existing" ]; then git fetch origin "$existing"; git checkout -b "$existing" "origin/$existing"; echo "BRANCH=$existing" >> $GITHUB_ENV; else git checkout -b "$BRANCH"; fi; else git checkout -b "$BRANCH"; fi
-          touch README.md; mkdir -p changelogs
-          if [ "${{ steps.scenario.outputs.value }}" = "BIG_DIFF" ]; then f="changelogs/${{ steps.pick.outputs.username }}-$(date +%s).md"; for i in $(seq 1 $((150 + RANDOM % 350))); do echo "- change $i at $(date -u)"; done > "$f"; else echo "Update by $AUTHOR at $(date -u)" >> README.md; if [ $((RANDOM % 6)) -eq 0 ] && [ -f "changelogs/old-${{ steps.pick.outputs.username }}.md" ]; then git rm -f "changelogs/old-${{ steps.pick.outputs.username }}.md" || true; fi; fi
-          git add -A; git commit -m "feat: sim update by $AUTHOR at $(date -u)"; git push -u origin "$BRANCH"
-      - id: openpr
+          r=$((RANDOM % total)); acc=0
+          for i in "${!scenarios[@]}"; do
+            acc=$((acc+weights[i]))
+            if [ $r -lt $acc ]; then
+              echo "value=${scenarios[i]}" >> $GITHUB_OUTPUT
+              break
+            fi
+          done
+          echo "Scenario: ${{ steps.scenario.outputs.value }}"
+
+      - name: Commit change (README preferred; vary size)
         if: steps.auth.outputs.skip != 'true'
+        shell: bash
         run: |
-          if [ $((RANDOM % 10)) -lt 7 ]; then URL=$(gh pr create --title "Sim PR by $AUTHOR" --body "Automated demo PR at $(date -u). Scenario: ${{ steps.scenario.outputs.value }}" --base main --head "$BRANCH" --draft=false || true); echo "url=$URL" >> $GITHUB_OUTPUT; fi
-      - id: pr
+          git config user.name "$AUTHOR"
+          git config user.email "$EMAIL"
+
+          # Sometimes reuse a previous sim branch to create multi-run timelines
+          if [ $((RANDOM % 10)) -lt 3 ]; then
+            existing=$(git ls-remote --heads origin "sim/${{ steps.pick.outputs.username }}-*" | head -n1 | awk '{print $2}' | cut -d/ -f3-)
+            if [ -n "$existing" ]; then
+              git fetch origin "$existing"
+              git checkout -b "$existing" "origin/$existing"
+              echo "BRANCH=$existing" >> $GITHUB_ENV
+            else
+              git checkout -b "$BRANCH"
+            fi
+          else
+            git checkout -b "$BRANCH"
+          fi
+
+          touch README.md
+          mkdir -p changelogs
+
+          if [ "${{ steps.scenario.outputs.value }}" = "BIG_DIFF" ]; then
+            f="changelogs/${{ steps.pick.outputs.username }}-$(date +%s).md"
+            for i in $(seq 1 $((150 + RANDOM % 350))); do echo "- change $i at $(date -u)"; done > "$f"
+          else
+            echo "Update by $AUTHOR at $(date -u)" >> README.md
+            # occasional deletion to create negative diffs
+            if [ $((RANDOM % 6)) -eq 0 ] && [ -f "changelogs/old-${{ steps.pick.outputs.username }}.md" ]; then
+              git rm -f "changelogs/old-${{ steps.pick.outputs.username }}.md" || true
+            fi
+          fi
+
+          git add -A
+          git commit -m "feat: sim update by $AUTHOR at $(date -u)"
+          git push -u origin "$BRANCH"
+
+      - name: Maybe open a PR
+        id: openpr
         if: steps.auth.outputs.skip != 'true'
+        shell: bash
         run: |
-          if [ -n "${{ steps.openpr.outputs.url }}" ]; then NUM=$(gh pr view "${{ steps.openpr.outputs.url }}" --json number -q .number); else NUM=$(gh pr list --state open --author "$AUTHOR" --json number,createdAt -q 'sort_by(.createdAt) | .[0].number'); fi
-          [ "$NUM" = "null" ] || [ -z "$NUM" ] && echo "number=" >> $GITHUB_OUTPUT || echo "number=$NUM" >> $GITHUB_OUTPUT
-      - if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+          # ~70% chance to open a PR on this run
+          if [ $((RANDOM % 10)) -lt 7 ]; then
+            URL=$(gh pr create \
+              --title "Sim PR by $AUTHOR" \
+              --body "Automated demo PR at $(date -u). Scenario: ${{ steps.scenario.outputs.value }}" \
+              --base main --head "$BRANCH" --draft=false || true)
+            echo "url=$URL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Find an open PR to act on
+        id: pr
+        if: steps.auth.outputs.skip != 'true'
+        shell: bash
         run: |
-          if [ $((RANDOM % 2)) -eq 0 ]; then gh pr comment ${{ steps.pr.outputs.number }} --body "General comment by $AUTHOR at $(date -u)"; fi
-      - id: pick_reviewer
+          if [ -n "${{ steps.openpr.outputs.url }}" ]; then
+            NUM=$(gh pr view "${{ steps.openpr.outputs.url }}" --json number -q .number)
+          else
+            NUM=$(gh pr list --state open --author "$AUTHOR" --json number,createdAt -q 'sort_by(.createdAt) | .[0].number')
+          fi
+          if [ "$NUM" = "null" ] || [ -z "$NUM" ]; then
+            echo "number=" >> $GITHUB_OUTPUT
+          else
+            echo "number=$NUM" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Maybe add a PR comment
         if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
         run: |
+          if [ $((RANDOM % 2)) -eq 0 ]; then
+            gh pr comment ${{ steps.pr.outputs.number }} --body "General comment by $AUTHOR at $(date -u)"
+          fi
+
+      - name: Pick reviewer secret name
+        id: pick_reviewer
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+        shell: bash
+        run: |
+          # Build pool excluding the actor’s own secret
           pool=$(jq -r 'map(select(. != "'${{ steps.pick.outputs.pat_secret }}'"))' <<< "${REVIEWER_CANDIDATES}")
-          chosen=""; for i in {1..10}; do len=$(jq 'length' <<< "$pool"); [ "$len" -eq 0 ] && break; idx=$((RANDOM % len)); sec=$(jq -r ".[$idx]" <<< "$pool"); val="${{ secrets[sec] }}"; [ -n "$val" ] && chosen="$sec" && break; done
+          chosen=""
+          for i in {1..10}; do
+            len=$(jq 'length' <<< "$pool"); [ "$len" -eq 0 ] && break
+            idx=$((RANDOM % len))
+            sec=$(jq -r ".[$idx]" <<< "$pool")   # e.g., PAT_JEFF
+            tok_var="S_${sec}"                   # e.g., S_PAT_JEFF
+            tok="${!tok_var}"
+            if [ -n "$tok" ]; then chosen="$sec"; break; fi
+          done
           echo "secret=$chosen" >> $GITHUB_OUTPUT
-      - if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number && steps.pick_reviewer.outputs.secret
+
+      - name: Leave review as reviewer
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number && steps.pick_reviewer.outputs.secret
+        shell: bash
         run: |
-          echo "${{ secrets[steps.pick_reviewer.outputs.secret] }}" | gh auth login --with-token
-          kinds=("COMMENT" "COMMENT" "APPROVE"); k=${kinds[$RANDOM % ${#kinds[@]}]}
-          if [ "$k" = "APPROVE" ]; then gh pr review ${{ steps.pr.outputs.number }} --approve --body "Approval at $(date -u)"; else gh pr review ${{ steps.pr.outputs.number }} --comment --body "Review comment at $(date -u)"; fi
+          tok_var="S_${{ steps.pick_reviewer.outputs.secret }}"
+          REVIEWER_TOKEN="${!tok_var}"
+          if [ -z "$REVIEWER_TOKEN" ]; then
+            echo "No reviewer token available; skipping review."
+            exit 0
+          fi
+
+          echo "$REVIEWER_TOKEN" | gh auth login --with-token
+          kinds=("COMMENT" "COMMENT" "APPROVE")
+          k=${kinds[$RANDOM % ${#kinds[@]}]}
+          if [ "$k" = "APPROVE" ]; then
+            gh pr review ${{ steps.pr.outputs.number }} --approve --body "Approval at $(date -u)"
+          else
+            gh pr review ${{ steps.pr.outputs.number }} --comment --body "Review comment at $(date -u)"
+          fi
+          # Restore original actor auth
           echo "$GH_TOKEN" | gh auth login --with-token
-      - if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+
+      - name: Maybe merge PR
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+        shell: bash
         run: |
-          if [ $((RANDOM % 10)) -lt 4 ]; then set +e; gh pr merge ${{ steps.pr.outputs.number }} --merge --delete-branch; set -e; fi
-      - if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+          # ~40% chance to merge; will no-op if protections prevent it
+          if [ $((RANDOM % 10)) -lt 4 ]; then
+            set +e
+            gh pr merge ${{ steps.pr.outputs.number }} --merge --delete-branch
+            set -e
+          fi
+
+      - name: Maybe close without merge
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+        shell: bash
         run: |
-          if [ $((RANDOM % 20)) -lt 3 ]; then gh pr close ${{ steps.pr.outputs.number }} --delete-branch; fi
+          # ~15% chance to close unmerged
+          if [ $((RANDOM % 20)) -lt 3 ]; then
+            gh pr close ${{ steps.pr.outputs.number }} --delete-branch
+          fi
