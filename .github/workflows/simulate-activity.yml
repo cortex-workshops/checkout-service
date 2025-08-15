@@ -2,7 +2,7 @@ name: Simulate User Activity (Web - Checkout Service)
 
 on:
   schedule:
-    - cron: "30 14,18 * * 1-5"   # Weekdays at 14:00 & 18:00 UTC
+    - cron: "30 14,18,16 * * 1-5"   # Weekdays at 14:00 & 18:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -84,6 +84,7 @@ jobs:
           echo "GH_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "AUTHOR=${{ steps.pick.outputs.git_name }}" >> $GITHUB_ENV
           echo "EMAIL=${{ steps.pick.outputs.git_email }}" >> $GITHUB_ENV
+          # Initial branch suggestion; may be overridden in commit step if we reuse an existing branch
           echo "BRANCH=sim/${{ steps.pick.outputs.username }}-$(date +%s)" >> $GITHUB_ENV
 
       - name: Stop if no actor token
@@ -112,8 +113,12 @@ jobs:
         if: steps.auth.outputs.skip != 'true'
         shell: bash
         run: |
-          git config user.name "$AUTHOR"
-          git config user.email "$EMAIL"
+          set -e
+          git config user.name "${AUTHOR}"
+          git config user.email "${EMAIL}"
+
+          # Load current BRANCH suggestion
+          BRANCH="${BRANCH}"
 
           # Sometimes reuse a previous sim branch to create multi-run timelines
           if [ $((RANDOM % 10)) -lt 3 ]; then
@@ -121,7 +126,10 @@ jobs:
             if [ -n "$existing" ]; then
               git fetch origin "$existing"
               git checkout -b "$existing" "origin/$existing"
-              echo "BRANCH=$existing" >> $GITHUB_ENV
+              # IMPORTANT: update both current shell and future steps
+              BRANCH="$existing"
+              export BRANCH
+              echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
             else
               git checkout -b "$BRANCH"
             fi
@@ -136,7 +144,7 @@ jobs:
             f="changelogs/${{ steps.pick.outputs.username }}-$(date +%s).md"
             for i in $(seq 1 $((150 + RANDOM % 350))); do echo "- change $i at $(date -u)"; done > "$f"
           else
-            echo "Update by $AUTHOR at $(date -u)" >> README.md
+            echo "Update by ${AUTHOR} at $(date -u)" >> README.md
             # occasional deletion to create negative diffs
             if [ $((RANDOM % 6)) -eq 0 ] && [ -f "changelogs/old-${{ steps.pick.outputs.username }}.md" ]; then
               git rm -f "changelogs/old-${{ steps.pick.outputs.username }}.md" || true
@@ -144,8 +152,10 @@ jobs:
           fi
 
           git add -A
-          git commit -m "feat: sim update by $AUTHOR at $(date -u)"
-          git push -u origin "$BRANCH"
+          git commit -m "feat: sim update by ${AUTHOR} at $(date -u)"
+          # Push the current checked-out branch safely
+          git push -u origin HEAD
+          set +e
 
       - name: Maybe open a PR
         id: openpr
@@ -155,9 +165,9 @@ jobs:
           # ~70% chance to open a PR on this run
           if [ $((RANDOM % 10)) -lt 7 ]; then
             URL=$(gh pr create \
-              --title "Sim PR by $AUTHOR" \
+              --title "Sim PR by ${AUTHOR}" \
               --body "Automated demo PR at $(date -u). Scenario: ${{ steps.scenario.outputs.value }}" \
-              --base main --head "$BRANCH" --draft=false || true)
+              --base main --head "${BRANCH}" --draft=false || true)
             echo "url=$URL" >> $GITHUB_OUTPUT
           fi
 
@@ -169,7 +179,7 @@ jobs:
           if [ -n "${{ steps.openpr.outputs.url }}" ]; then
             NUM=$(gh pr view "${{ steps.openpr.outputs.url }}" --json number -q .number)
           else
-            NUM=$(gh pr list --state open --author "$AUTHOR" --json number,createdAt -q 'sort_by(.createdAt) | .[0].number')
+            NUM=$(gh pr list --state open --author "${AUTHOR}" --json number,createdAt -q 'sort_by(.createdAt) | .[0].number')
           fi
           if [ "$NUM" = "null" ] || [ -z "$NUM" ]; then
             echo "number=" >> $GITHUB_OUTPUT
@@ -181,7 +191,7 @@ jobs:
         if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
         run: |
           if [ $((RANDOM % 2)) -eq 0 ]; then
-            gh pr comment ${{ steps.pr.outputs.number }} --body "General comment by $AUTHOR at $(date -u)"
+            gh pr comment ${{ steps.pr.outputs.number }} --body "General comment by ${AUTHOR} at $(date -u)"
           fi
 
       - name: Pick reviewer secret name
