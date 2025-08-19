@@ -1,0 +1,128 @@
+name: Simulate Deploy to Cortex (Web - checkout-service)
+
+on:
+  schedule:
+    - cron: "5 14,20 * * 1-5"   # Weekdays, 2x/day UTC
+  workflow_dispatch:
+    inputs:
+      force_type:
+        description: "DEPLOY|ROLLBACK|SCALE|RESTART"
+        required: false
+        default: ""
+      force_env:
+        description: "staging|prod"
+        required: false
+        default: ""
+      title_suffix:
+        description: "Optional title suffix"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  send-deploy:
+    runs-on: ubuntu-latest
+    env:
+      CORTEX_BASE_URL: https://api.getcortexapp.com
+      # Type weights (sum to 100): DEPLOY / ROLLBACK / SCALE / RESTART
+      W_DEPLOY: 70
+      W_ROLLBACK: 10
+      W_SCALE: 12
+      W_RESTART: 8
+      # % of prod vs staging
+      ENV_PROD_PCT: 40
+
+      # Web team
+      ACTORS: |
+        [
+          {"username":"chase","name":"Chase Lancaster","email":"chase.lancaster@cortex.io"},
+          {"username":"marion","name":"Marion Martorell","email":"marion.martorell@cortex.io"}
+        ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+
+      - name: Choose deployer (rotate)
+        id: pick
+        shell: bash
+        run: |
+          idx=$((RANDOM % $(jq 'length' <<< "${ACTORS}")))
+          obj=$(jq -r ".[$idx]" <<< "${ACTORS}")
+          echo "username=$(jq -r '.username' <<< "$obj")" >> $GITHUB_OUTPUT
+          echo "name=$(jq -r '.name' <<< "$obj")"         >> $GITHUB_OUTPUT
+          echo "email=$(jq -r '.email' <<< "$obj")"       >> $GITHUB_OUTPUT
+
+      - name: Decide type/environment/sha/title
+        id: decide
+        shell: bash
+        run: |
+          force_type="${{ github.event.inputs.force_type }}"
+          if [ -n "$force_type" ]; then TYPE="$force_type"; else
+            r=$((RANDOM % 100))
+            d=${W_DEPLOY:-70}; rb=${W_ROLLBACK:-10}; sc=${W_SCALE:-12}; rs=${W_RESTART:-8}
+            if   [ $r -lt $d ]; then TYPE="DEPLOY"
+            elif [ $r -lt $((d+rb)) ]; then TYPE="ROLLBACK"
+            elif [ $r -lt $((d+rb+sc)) ]; then TYPE="SCALE"
+            else TYPE="RESTART"; fi
+          fi
+
+          force_env="${{ github.event.inputs.force_env }}"
+          if [ -n "$force_env" ]; then ENV="$force_env"; else
+            p=${ENV_PROD_PCT:-40}; r=$((RANDOM % 100)); [ $r -lt $p ] && ENV="prod" || ENV="staging"
+          fi
+
+          if git rev-parse --verify HEAD >/dev/null 2>&1; then SHA="$(git rev-parse HEAD)"; else SHA="$(tr -dc 'a-f0-9' </dev/urandom | head -c 40)"; fi
+          SHORT="${SHA:0:7}"
+          SUFFIX="${{ github.event.inputs.title_suffix }}"; [ -n "$SUFFIX" ] && SUFFIX=" - $SUFFIX"
+          TITLE="${TYPE^} ${SHORT} to ${ENV}${SUFFIX}"
+
+          echo "type=$TYPE"   >> $GITHUB_OUTPUT
+          echo "env=$ENV"     >> $GITHUB_OUTPUT
+          echo "sha=$SHA"     >> $GITHUB_OUTPUT
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+
+      - name: Build payload
+        id: payload
+        shell: bash
+        run: |
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          jq -n \
+            --arg ts "$now" \
+            --arg type "${{ steps.decide.outputs.type }}" \
+            --arg env  "${{ steps.decide.outputs.env }}" \
+            --arg sha  "${{ steps.decide.outputs.sha }}" \
+            --arg title "${{ steps.decide.outputs.title }}" \
+            --arg url  "$run_url" \
+            --arg uname "${{ steps.pick.outputs.username }}" \
+            --arg dname "${{ steps.pick.outputs.name }}" \
+            --arg email "${{ steps.pick.outputs.email }}" \
+            '{
+              timestamp: $ts,
+              type: $type,
+              environment: $env,
+              sha: $sha,
+              title: $title,
+              url: $url,
+              deployer: { username: $uname, name: $dname, email: $email },
+              customData: { source: "gh-actions", workflow: "simulate-deploy", repo: env.GITHUB_REPOSITORY }
+            }' > payload.json
+          echo "tag=${GITHUB_REPOSITORY##*/}" >> $GITHUB_OUTPUT
+
+      - name: Send to Cortex
+        env:
+          TOKEN: ${{ secrets.CORTEX_API_TOKEN }}
+          CORTEX_BASE_URL: https://api.getcortexapp.com
+        shell: bash
+        run: |
+          [ -z "$TOKEN" ] && { echo "Missing CORTEX_API_TOKEN"; exit 1; }
+          TAG="${{ steps.payload.outputs.tag }}"
+          URL="${CORTEX_BASE_URL}/api/v1/catalog/${TAG}/deploys"
+          http_code=$(curl -sS -o resp.json -w "%{http_code}" -X POST "$URL" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data @payload.json)
+          echo "Response: $http_code"; cat resp.json || true; case "$http_code" in 2*) exit 0;; *) exit 1;; esac
