@@ -319,17 +319,18 @@ jobs:
         if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
         shell: bash
         run: |
+          # Use only fields supported by `gh pr view --json`
           gh pr view ${{ steps.pr.outputs.number }} \
-            --json state,mergeable,mergeStateStatus,reviewDecision,requiredApprovingReviewCount,baseRefName,isDraft \
+            --json state,mergeable,mergeStateStatus,reviewDecision,baseRefName,isDraft \
             -q '
               "state=" + .state + "\n" +
               "mergeable=" + (.mergeable|tostring) + "\n" +
               "mergeStateStatus=" + .mergeStateStatus + "\n" +
               "reviewDecision=" + (.reviewDecision|tostring) + "\n" +
-              "requiredApprovingReviewCount=" + (.requiredApprovingReviewCount|tostring) + "\n" +
               "baseRefName=" + .baseRefName + "\n" +
               "isDraft=" + (.isDraft|tostring)
             '
+
 
       - name: Maybe (auto) merge PR
         if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
