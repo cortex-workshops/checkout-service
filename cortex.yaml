@@ -18,3 +18,7 @@ info:
     github:
       alias: cortex
       repository: cortex-workshops/checkout-service
+  x-cortex-issues:
+    jira:
+      labels:
+        - name: web
