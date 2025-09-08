@@ -14,6 +14,9 @@ info:
     - name: README
       type: docs
       url: https://github.com/cortex-workshops/checkout-service#readme
+    - name: Logs
+      type: logs
+      url: https://datadog.com
   x-cortex-git:
     github:
       alias: cortex
