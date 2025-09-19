@@ -25,3 +25,7 @@ info:
     jira:
       labels:
         - name: web
+  x-cortex-oncall:
+    pagerduty:
+      id: PLZ3RDQ
+      type: SERVICE
