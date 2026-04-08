@@ -26,18 +26,19 @@ jobs:
       S_PAT_MARION:   ${{ secrets.PAT_MARION }}
       S_PAT_ROSHNI:   ${{ secrets.PAT_ROSHNI }}
       S_PAT_GIANPAUL: ${{ secrets.PAT_GIANPAUL }}
+      S_PAT_BECKA:    ${{ secrets.PAT_BECKA }}
 
       # --- Team actors for THIS repo (Web Team) ---
       ACTORS: |
         [
           {"username":"chase","git_name":"Chase","git_email":"chase@cortex.io","pat_secret":"PAT_CHASE"},
-          {"username":"marion","git_name":"Marion","git_email":"marion@cortex.io","pat_secret":"PAT_MARION"},
-          {"username":"taylor","git_name":"Taylor Schmidt","git_email":"taylor@cortex.io","pat_secret":"PAT_TAYLOR"}
+          {"username":"taylor","git_name":"Taylor Schmidt","git_email":"taylor@cortex.io","pat_secret":"PAT_TAYLOR"},
+          {"username":"becka","git_name":"Becka","git_email":"becka@cortex.io","pat_secret":"PAT_BECKA"}
         ]
 
-      # --- Org-wide reviewer pool (we'll avoid the actor’s own token) ---
+      # --- Org-wide reviewer pool (we'll avoid the actor's own token) ---
       REVIEWER_CANDIDATES: |
-        ["PAT_TAYLOR","PAT_CATHLEEN","PAT_SALLY","PAT_JEFF","PAT_STEPH","PAT_CHASE","PAT_MARION","PAT_ROSHNI","PAT_GIANPAUL"]
+        ["PAT_TAYLOR","PAT_CATHLEEN","PAT_SALLY","PAT_JEFF","PAT_STEPH","PAT_CHASE","PAT_MARION","PAT_ROSHNI","PAT_GIANPAUL","PAT_BECKA"]
 
       # --- Delay tuning (minutes) for non-zero time-to-first-review/approval ---
       FIRST_REVIEW_MIN: "15"
