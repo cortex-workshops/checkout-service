@@ -175,7 +175,7 @@ jobs:
         if: steps.auth.outputs.skip != 'true'
         shell: bash
         run: |
-          if [ $((RANDOM % 10)) -lt 7 ]; then
+          if [ $((RANDOM % 10)) -lt 9 ]; then
             URL=$(gh pr create \
               --title "Sim PR by ${AUTHOR}" \
               --body "Automated demo PR at $(date -u). Scenario: ${{ steps.scenario.outputs.value }}" \
