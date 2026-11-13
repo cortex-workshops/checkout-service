@@ -35,3 +35,7 @@ info:
     pagerduty:
       id: PLZ3RDQ
       type: SERVICE
+  x-cortex-apm:
+    sentry:
+      projects:
+        - name: checkout-service
