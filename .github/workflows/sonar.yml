@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pytest pytest-cov
-      - run: pytest --cov=checkout --cov-report=xml
+      - run: python -m pytest --cov=checkout --cov-report=xml
       - uses: SonarSource/sonarqube-scan-action@v5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
