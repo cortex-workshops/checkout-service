@@ -17,10 +17,16 @@ info:
     - name: Logs
       type: logs
       url: https://datadog.com
+    - name: Incident runbook
+      type: runbook
+      url: https://www.notion.so/cortexio
   x-cortex-git:
     github:
       alias: cortex
       repository: cortex-workshops/checkout-service
+  x-cortex-static-analysis:
+    sonarqube:
+      project: cortex-workshops_checkout-service
   x-cortex-issues:
     jira:
       labels:
