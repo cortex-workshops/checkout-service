@@ -2,40 +2,53 @@ openapi: 3.0.0
 info:
   title: Checkout Service
   description: Manages shopping cart and checkout flow.
-  x-cortex-tag: checkout-service
-  x-cortex-type: service
-  x-cortex-groups:
-    - web-applications
-  x-cortex-owners:
-    - type: group
-      name: cortex-workshops/web-team
-      provider: GITHUB
-  x-cortex-link:
-    - name: README
-      type: docs
-      url: https://github.com/cortex-workshops/checkout-service#readme
-    - name: Logs
-      type: logs
-      url: https://datadog.com
-    - name: Incident runbook
-      type: runbook
-      url: https://www.notion.so/cortexio
+  x-cortex-apm:
+    sentry:
+      projects:
+      - name: checkout-service
   x-cortex-git:
     github:
       alias: cortex
       repository: cortex-workshops/checkout-service
-  x-cortex-static-analysis:
-    sonarqube:
-      project: cortex-workshops_checkout-service
+  x-cortex-tag: checkout-service
+  x-cortex-link:
+  - url: https://github.com/cortex-workshops/checkout-service#readme
+    name: README
+    type: docs
+  - url: https://datadog.com
+    name: Logs
+    type: logs
+  - url: https://www.notion.so/cortexio
+    name: Incident runbook
+    type: runbook
+  x-cortex-type: service
+  x-cortex-groups:
+  - web-applications
   x-cortex-issues:
     jira:
       labels:
-        - name: web
+      - name: web
   x-cortex-oncall:
     pagerduty:
       id: PLZ3RDQ
       type: SERVICE
-  x-cortex-apm:
-    sentry:
-      projects:
-        - name: checkout-service
+  x-cortex-owners:
+  - name: cortex-workshops/web-team
+    type: group
+    provider: GITHUB
+  x-cortex-static-analysis:
+    sonarqube:
+      project: cortex-workshops_checkout-service
+  x-cortex-dependency:
+  - tag: spanner-us-central1
+    description: Cart and order state
+  - tag: payments-service
+    description: Charges the customer at checkout
+  - tag: inventory-service
+    description: Checks and reserves stock
+  - tag: notifications-service
+    description: Sends order confirmation
+  x-cortex-relationships:
+  - type: environment-mapping
+    destinations:
+    - tag: production
